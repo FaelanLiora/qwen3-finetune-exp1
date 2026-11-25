@@ -1,0 +1,9 @@
+# 注意：torch / CUDA 由平台的 PyTorch 镜像预装（PyTorch 2.4.0 + CUDA 12.1）
+# 不要在这里重装 torch，否则会把镜像自带的 CUDA 版本覆盖掉。
+transformers>=4.51.0
+peft>=0.11.0
+datasets>=2.20.0
+accelerate>=0.33.0
+modelscope>=1.16.0
+pandas
+tqdm
