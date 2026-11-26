@@ -159,6 +159,9 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=0, help=">0 时只评前 N 条（冒烟测试）")
     ap.add_argument("--skip_gsm8k", action="store_true",
                     help="跳过数学评测，直接读上次存下的成绩（用于只补考科学）")
+    ap.add_argument("--gsm8k_file", default="gsm8k_test.jsonl",
+                    help="用哪个文件当数学题集；设为 train.jsonl 可检查是否在背训练集")
+    ap.add_argument("--skip_arc", action="store_true", help="跳过科学评测（只查数学时用）")
     args = ap.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -175,7 +178,7 @@ def main() -> None:
         gsm_acc = sum(x["correct"] for x in gsm_out) / len(gsm_out)
         print(f"  已读取 {len(gsm_out)} 条，正确率 {gsm_acc:.4f}")
     else:
-        gsm_rows = load_jsonl(os.path.join(args.data_dir, "gsm8k_test.jsonl"))
+        gsm_rows = load_jsonl(os.path.join(args.data_dir, args.gsm8k_file))
         if args.limit > 0:
             gsm_rows = gsm_rows[: args.limit]
         print(f"\n[1/2] GSM8K 评测（{len(gsm_rows)} 条）...")
@@ -187,16 +190,20 @@ def main() -> None:
                 f.write(json.dumps(x, ensure_ascii=False) + "\n")
 
     # ---- ARC ----
-    arc_rows = load_jsonl(os.path.join(args.data_dir, "arc_test.jsonl"))
-    if args.limit > 0:
-        arc_rows = arc_rows[: args.limit]
-    print(f"[2/2] ARC-Challenge 评测（{len(arc_rows)} 条）...")
-    arc_out = arc_eval(model, tok, arc_rows)
-    arc_acc = sum(x["correct"] for x in arc_out) / len(arc_out)
+    if args.skip_arc:
+        print("[2/2] 跳过 ARC-Challenge")
+        arc_out, arc_acc = [], -1.0
+    else:
+        arc_rows = load_jsonl(os.path.join(args.data_dir, "arc_test.jsonl"))
+        if args.limit > 0:
+            arc_rows = arc_rows[: args.limit]
+        print(f"[2/2] ARC-Challenge 评测（{len(arc_rows)} 条）...")
+        arc_out = arc_eval(model, tok, arc_rows)
+        arc_acc = sum(x["correct"] for x in arc_out) / len(arc_out)
 
-    with open(os.path.join(args.out_dir, f"{args.tag}_arc.jsonl"), "w", encoding="utf-8") as f:
-        for x in arc_out:
-            f.write(json.dumps(x, ensure_ascii=False) + "\n")
+        with open(os.path.join(args.out_dir, f"{args.tag}_arc.jsonl"), "w", encoding="utf-8") as f:
+            for x in arc_out:
+                f.write(json.dumps(x, ensure_ascii=False) + "\n")
 
     # ---- 汇总 ----
     summary = {
