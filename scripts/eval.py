@@ -106,12 +106,18 @@ def arc_eval(model, tok, rows) -> list[dict]:
     total = len(rows)
     t0 = time.time()
 
-    # 预先算好每个字母对应的 token id（同时考虑 "A" 和 " A" 两种写法，取概率大的）
-    label_ids = {}
-    for lab in ["A", "B", "C", "D", "E"]:
-        ids = {tok.encode(lab, add_special_tokens=False)[0],
-               tok.encode(" " + lab, add_special_tokens=False)[0]}
-        label_ids[lab] = sorted(ids)
+    # 选项标签有两种写法：多数题是字母 A/B/C/D，少数题是数字 1/2/3/4。
+    # 所以不能写死字母表，要按每道题自己的标签去查 token 编号。
+    label_ids: dict[str, list[int]] = {}
+
+    def ids_of(lab: str) -> list[int]:
+        """取某个标签对应的 token 编号，同时算「带空格」和「不带空格」两种写法。"""
+        if lab not in label_ids:
+            label_ids[lab] = sorted({
+                tok.encode(lab, add_special_tokens=False)[0],
+                tok.encode(" " + lab, add_special_tokens=False)[0],
+            })
+        return label_ids[lab]
 
     for i, r in enumerate(rows):
         enc = tok(r["prompt"], return_tensors="pt").to(model.device)
@@ -120,7 +126,7 @@ def arc_eval(model, tok, rows) -> list[dict]:
 
         best_lab, best_score = None, -1e9
         for lab in r["labels"]:
-            score = max(logp[t].item() for t in label_ids[lab])
+            score = max(logp[t].item() for t in ids_of(lab))
             if score > best_score:
                 best_lab, best_score = lab, score
 
@@ -151,6 +157,8 @@ def main() -> None:
     ap.add_argument("--batch_size", type=int, default=32)
     ap.add_argument("--max_new_tokens", type=int, default=512)
     ap.add_argument("--limit", type=int, default=0, help=">0 时只评前 N 条（冒烟测试）")
+    ap.add_argument("--skip_gsm8k", action="store_true",
+                    help="跳过数学评测，直接读上次存下的成绩（用于只补考科学）")
     args = ap.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -159,16 +167,24 @@ def main() -> None:
     tok, model = load_model(args.model, args.adapter)
 
     # ---- GSM8K ----
-    gsm_rows = load_jsonl(os.path.join(args.data_dir, "gsm8k_test.jsonl"))
-    if args.limit > 0:
-        gsm_rows = gsm_rows[: args.limit]
-    print(f"\n[1/2] GSM8K 评测（{len(gsm_rows)} 条）...")
-    gsm_out = gsm8k_eval(model, tok, gsm_rows, args.batch_size, args.max_new_tokens)
-    gsm_acc = sum(x["correct"] for x in gsm_out) / len(gsm_out)
+    gsm_path = os.path.join(args.out_dir, f"{args.tag}_gsm8k.jsonl")
+    if args.skip_gsm8k:
+        # 上次已经考过数学了，直接读盘上的成绩，不重复跑（省十分钟）
+        print(f"\n[1/2] 跳过 GSM8K，读取已有成绩：{gsm_path}")
+        gsm_out = load_jsonl(gsm_path)
+        gsm_acc = sum(x["correct"] for x in gsm_out) / len(gsm_out)
+        print(f"  已读取 {len(gsm_out)} 条，正确率 {gsm_acc:.4f}")
+    else:
+        gsm_rows = load_jsonl(os.path.join(args.data_dir, "gsm8k_test.jsonl"))
+        if args.limit > 0:
+            gsm_rows = gsm_rows[: args.limit]
+        print(f"\n[1/2] GSM8K 评测（{len(gsm_rows)} 条）...")
+        gsm_out = gsm8k_eval(model, tok, gsm_rows, args.batch_size, args.max_new_tokens)
+        gsm_acc = sum(x["correct"] for x in gsm_out) / len(gsm_out)
 
-    with open(os.path.join(args.out_dir, f"{args.tag}_gsm8k.jsonl"), "w", encoding="utf-8") as f:
-        for x in gsm_out:
-            f.write(json.dumps(x, ensure_ascii=False) + "\n")
+        with open(gsm_path, "w", encoding="utf-8") as f:
+            for x in gsm_out:
+                f.write(json.dumps(x, ensure_ascii=False) + "\n")
 
     # ---- ARC ----
     arc_rows = load_jsonl(os.path.join(args.data_dir, "arc_test.jsonl"))
