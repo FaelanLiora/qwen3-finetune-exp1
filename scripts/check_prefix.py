@@ -68,8 +68,13 @@ def main() -> None:
                         collate_fn=make_collate(tok.pad_token_id), num_workers=2)
 
     print("加载基座 ...", flush=True)
+    # 【关键】attn_implementation="eager"
+    # transformers 5 默认用 SDPA + is_causal 快捷方式算掩码，它假设查询和键等长。
+    # 前缀会让键多出 20 个位置，导致掩码错位 20 格，模型看到的"上文"全错。
+    # eager 实现会按真实长度生成掩码，前缀才能正确接上。
     base = AutoModelForCausalLM.from_pretrained(
-        args.model, dtype=torch.bfloat16, device_map="cuda")
+        args.model, dtype=torch.bfloat16, device_map="cuda",
+        attn_implementation="eager")
     base.config.use_cache = False
     l0 = mean_loss(base, loader)
     print(f"\n[1] 纯基座（无前缀）        损失 = {l0:.4f}")
@@ -88,7 +93,8 @@ def main() -> None:
     del m2
     torch.cuda.empty_cache()
     base2 = AutoModelForCausalLM.from_pretrained(
-        args.model, dtype=torch.bfloat16, device_map="cuda")
+        args.model, dtype=torch.bfloat16, device_map="cuda",
+        attn_implementation="eager")
     base2.config.use_cache = False
     m3 = get_peft_model(base2, cfg)
     l3 = mean_loss(m3, loader)
