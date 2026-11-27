@@ -35,8 +35,13 @@ from peft import PrefixTuningConfig, get_peft_model
 from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+import transformers
+
 import train_common
 from sft_dataset import SFTDataset, make_collate
+
+# transformers 4.x 用 torch_dtype，5.x 用 dtype。这个变量让同一份代码两边都能跑。
+_DTYPE_KW = "dtype" if int(transformers.__version__.split(".")[0]) >= 5 else "torch_dtype"
 
 
 def main() -> None:
@@ -62,7 +67,7 @@ def main() -> None:
         tok.pad_token = tok.eos_token
 
     model = AutoModelForCausalLM.from_pretrained(
-        args.model, dtype=torch.bfloat16, device_map="cuda"
+        args.model, device_map="cuda", **{_DTYPE_KW: torch.bfloat16}
     )
     model.config.use_cache = False
 

@@ -30,7 +30,12 @@ import time
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+import transformers
+
 from common import is_correct, predict_final_answer
+
+# transformers 4.x 用 torch_dtype，5.x 用 dtype。这个变量让同一份代码两边都能跑。
+_DTYPE_KW = "dtype" if int(transformers.__version__.split(".")[0]) >= 5 else "torch_dtype"
 
 
 # ---------------------------------------------------------------- 工具函数
@@ -46,7 +51,7 @@ def load_model(model_path: str, adapter: str | None = None):
         tok.pad_token = tok.eos_token
 
     model = AutoModelForCausalLM.from_pretrained(
-        model_path, dtype=torch.bfloat16, device_map="cuda"
+        model_path, device_map="cuda", **{_DTYPE_KW: torch.bfloat16}
     )
     if adapter:
         from peft import PeftModel
