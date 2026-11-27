@@ -80,8 +80,14 @@ class ManualPrefix(nn.Module):
         return cache
 
 
+@torch.no_grad()
 def manual_loss(model, prefix: ManualPrefix, loader, max_batches: int = 4) -> float:
-    """用手写前缀算损失。"""
+    """用手写前缀算损失。
+
+    【必须加 @torch.no_grad()】
+    这里只做前向、不训练。如果不关梯度，PyTorch 会把每一层的中间结果都留着
+    以备反向传播，显存会从 2 GB 涨到 20 GB 以上，直接爆掉。
+    """
     nv = prefix.n_tokens
     total, n = 0.0, 0
     for i, batch in enumerate(loader):
@@ -137,6 +143,8 @@ def main() -> None:
     model = fresh_model()
     l0 = mean_loss(model, loader)
     print(f"\n[1] 纯基座                    损失 = {l0:.4f}   ← 参照值")
+    del model                       # 用完立刻释放，避免和后面的模型抢显存
+    torch.cuda.empty_cache()
 
     if args.impl in ("prefix", "all"):
         cfg = PrefixTuningConfig(num_virtual_tokens=args.num_virtual_tokens,
