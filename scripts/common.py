@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 
 # ============================================================
@@ -59,15 +60,21 @@ def predict_final_answer(text: str) -> str | None:
 
 
 def _norm(x: str | None) -> str | None:
-    """数字归一化：去逗号、去空格、5.0 -> 5。"""
+    """数字归一化：去逗号、去空格、5.0 -> 5。
+
+    注意：模型可能吐出几十位的超长数字，转成浮点会变成 inf，
+    再转 int 就会抛 OverflowError。所以必须先判断是否有限。
+    """
     if x is None:
         return None
     x = str(x).replace(",", "").strip()
     try:
         f = float(x)
-        return str(int(f)) if f == int(f) else str(f)
     except ValueError:
         return x
+    if not math.isfinite(f):        # inf / nan 不参与比较，原样返回
+        return x
+    return str(int(f)) if f == int(f) else str(f)
 
 
 def is_correct(pred: str | None, gold: str | None) -> bool:

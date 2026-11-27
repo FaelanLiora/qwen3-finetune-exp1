@@ -162,6 +162,7 @@ def main() -> None:
     ap.add_argument("--gsm8k_file", default="gsm8k_test.jsonl",
                     help="用哪个文件当数学题集；设为 train.jsonl 可检查是否在背训练集")
     ap.add_argument("--skip_arc", action="store_true", help="跳过科学评测（只查数学时用）")
+    ap.add_argument("--show", type=int, default=0, help="最后打印前 N 条模型原话（排查用）")
     args = ap.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -188,6 +189,14 @@ def main() -> None:
         with open(gsm_path, "w", encoding="utf-8") as f:
             for x in gsm_out:
                 f.write(json.dumps(x, ensure_ascii=False) + "\n")
+
+    # 排查用：把模型的原话打出来
+    if args.show > 0:
+        print(f"\n===== 前 {args.show} 条模型原话 =====")
+        for x in gsm_out[: args.show]:
+            print(f"[{x['id']}] 标准={x['gold']}  预测={x['pred']}  对={x['correct']}")
+            print(repr(x["output"][:400]))
+            print("-" * 60)
 
     # ---- ARC ----
     if args.skip_arc:
