@@ -20,7 +20,8 @@ import argparse
 import os
 
 import torch
-from peft import PrefixTuningConfig, get_peft_model
+from peft import (PrefixTuningConfig, PromptTuningConfig, PromptTuningInit,
+                  get_peft_model)
 from torch.utils.data import DataLoader
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
@@ -56,6 +57,8 @@ def main() -> None:
     ap.add_argument("--data_dir", default="/root/autodl-tmp/data")
     ap.add_argument("--num_virtual_tokens", type=int, default=20)
     ap.add_argument("--max_len", type=int, default=512)
+    ap.add_argument("--mode", default="prefix", choices=["prefix", "prompt", "both"],
+                    help="prefix=每层K/V前缀(原方案)  prompt=输入层软提示(备选)  both=两种都测")
     args = ap.parse_args()
 
     tok = AutoTokenizer.from_pretrained(args.model)
@@ -79,32 +82,46 @@ def main() -> None:
     l0 = mean_loss(base, loader)
     print(f"\n[1] 纯基座（无前缀）        损失 = {l0:.4f}")
 
-    cfg = PrefixTuningConfig(num_virtual_tokens=args.num_virtual_tokens,
-                             task_type="CAUSAL_LM", prefix_projection=False)
+    def fresh_model():
+        m = AutoModelForCausalLM.from_pretrained(
+            args.model, dtype=torch.bfloat16, device_map="cuda",
+            attn_implementation="eager")
+        m.config.use_cache = False
+        return m
 
-    # 情况 2：缩小初始化
-    m2 = get_peft_model(base, cfg)
-    n = shrink_prefix(m2, args.num_virtual_tokens, 0.02)
-    print(f"    已缩放 {n} 个前缀向量（std=0.02）")
-    l2 = mean_loss(m2, loader)
-    print(f"[2] 挂前缀 + 小初始化       损失 = {l2:.4f}   （与 [1] 的差 = {l2-l0:+.4f}）")
+    # ---------- 方案一：每层 K/V 前缀（原方案）----------
+    if args.mode in ("prefix", "both"):
+        cfg = PrefixTuningConfig(num_virtual_tokens=args.num_virtual_tokens,
+                                 task_type="CAUSAL_LM", prefix_projection=False)
+        m2 = get_peft_model(fresh_model(), cfg)
+        n = shrink_prefix(m2, args.num_virtual_tokens, 0.02)
+        print(f"    已缩放 {n} 个前缀向量（std=0.02）")
+        l2 = mean_loss(m2, loader)
+        print(f"[2] 每层 K/V 前缀（小初始化）  损失 = {l2:.4f}   （与 [1] 的差 = {l2-l0:+.4f}）")
+        del m2
+        torch.cuda.empty_cache()
 
-    # 情况 3：默认初始化
-    del m2
-    torch.cuda.empty_cache()
-    base2 = AutoModelForCausalLM.from_pretrained(
-        args.model, dtype=torch.bfloat16, device_map="cuda",
-        attn_implementation="eager")
-    base2.config.use_cache = False
-    m3 = get_peft_model(base2, cfg)
-    l3 = mean_loss(m3, loader)
-    print(f"[3] 挂前缀 + 默认初始化     损失 = {l3:.4f}   （与 [1] 的差 = {l3-l0:+.4f}）")
+    # ---------- 方案二：输入层软提示（备选）----------
+    if args.mode in ("prompt", "both"):
+        cfg_p = PromptTuningConfig(
+            num_virtual_tokens=args.num_virtual_tokens,
+            task_type="CAUSAL_LM",
+            prompt_tuning_init=PromptTuningInit.RANDOM,
+            tokenizer_name_or_path=args.model,
+        )
+        m3 = get_peft_model(fresh_model(), cfg_p)
+        n3 = sum(p.numel() for p in m3.parameters() if p.requires_grad)
+        print(f"    软提示可训练参数 {n3/1e6:.3f}M")
+        l3 = mean_loss(m3, loader)
+        print(f"[3] 输入层软提示              损失 = {l3:.4f}   （与 [1] 的差 = {l3-l0:+.4f}）")
+        del m3
+        torch.cuda.empty_cache()
 
     print("""
 ===== 结论怎么读 =====
-· [2] 与 [1] 接近（差 < 0.2）  → 前缀注入正常，问题在"训练方式"（学习率太大等）
-· [2] 明显高于 [1]（差 > 1）   → 前缀注入本身破坏了模型，是版本兼容问题，需要换实现方式
-· [3] 远高于 [2]              → 默认初始化的破坏性确实很大，缩小初始化是必要的
+· [2] 与 [1] 接近（差 < 0.2）→ 每层 K/V 前缀可用，问题在训练方式
+· [2] 明显高于 [1]（差 > 1） → 每层 K/V 前缀在本框架下不可用
+· [3] 与 [1] 接近（差 < 0.2）→ 输入层软提示可用，可作为备选方案
 """)
 
 
