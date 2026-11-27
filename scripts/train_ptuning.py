@@ -74,6 +74,18 @@ def main() -> None:
     model = get_peft_model(model, cfg)
     model.print_trainable_parameters()
 
+    # 【关键一步】缩小前缀的初始值
+    # PEFT 默认用标准正态分布初始化前缀向量（数值约 ±1），而 K/V 的正常取值范围远小于此，
+    # 训练开始时会把注意力彻底搅乱（实测初始损失高达 6~7）。
+    # 这里把它缩小到 0.02，让训练从"几乎不影响模型"的状态起步，
+    # 与 LoRA 把 B 初始化为 0 是同一个道理。
+    n_reset = 0
+    for _, mod in model.named_modules():
+        if isinstance(mod, torch.nn.Embedding) and mod.weight.shape[0] == args.num_virtual_tokens:
+            torch.nn.init.normal_(mod.weight, mean=0.0, std=0.02)
+            n_reset += 1
+    print(f"已把 {n_reset} 个前缀向量的初始标准差缩放为 0.02")
+
     # 冻结模型只反传到前缀，开启输入梯度，避免梯度检查点下断链
     try:
         model.enable_input_require_grads()
