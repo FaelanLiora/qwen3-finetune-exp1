@@ -129,6 +129,8 @@ def main() -> None:
     ap.add_argument("--limit", type=int, default=8)
     ap.add_argument("--max_new", type=int, default=512)
     ap.add_argument("--n_tokens", type=int, default=20)
+    ap.add_argument("--check_loss", action="store_true",
+                    help="不算生成了，改为在验证集上算损失，用来核对前缀权重是否读对")
     args = ap.parse_args()
 
     tok = AutoTokenizer.from_pretrained(args.model)
@@ -142,6 +144,41 @@ def main() -> None:
     model.config.use_cache = False
 
     prefix = load_trained_prefix(args.adapter, model.config, args.n_tokens, model.device)
+
+    # ---- 核对：用手写前缀算验证损失，和训练时 peft 报的数字比较 ----
+    if args.check_loss:
+        from torch.utils.data import DataLoader
+        from sft_dataset import SFTDataset, make_collate
+
+        val_path = os.path.join(os.path.dirname(args.data), "val.jsonl")
+        ds = SFTDataset(val_path, tok, 512)
+        ds.rows = ds.rows[:32]
+        loader = DataLoader(ds, batch_size=8, shuffle=False,
+                            collate_fn=make_collate(tok.pad_token_id), num_workers=2)
+
+        nv = prefix.n_tokens
+        total, n = 0.0, 0
+        with torch.no_grad():
+            for i, batch in enumerate(loader):
+                if i >= 4:
+                    break
+                ids = batch["input_ids"].to(model.device)
+                mask = batch["attention_mask"].to(model.device)
+                labels = batch["labels"].to(model.device)
+                bsz, seq_len = ids.shape
+                ext_mask = torch.cat(
+                    [torch.ones(bsz, nv, dtype=mask.dtype, device=mask.device), mask], dim=1)
+                cache = prefix.build_cache(bsz, model.device)
+                pos = torch.arange(nv, nv + seq_len, device=model.device)
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    out = model(input_ids=ids, attention_mask=ext_mask, labels=labels,
+                                past_key_values=cache, cache_position=pos)
+                total += out.loss.item()
+                n += 1
+        print(f"\n用手写前缀算的验证损失 = {total/max(1,n):.4f}")
+        print("对比：训练时 peft 报的验证损失 = 见 logs（3 轮应为 1.3332，6 轮应为 1.0415）")
+        print("两者接近 → 权重读对了；明显更高 → 权重拆分有误")
+        return
 
     with open(args.data, encoding="utf-8") as f:
         rows = [json.loads(line) for line in f if line.strip()][: args.limit]
