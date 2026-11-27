@@ -45,19 +45,36 @@ class ManualPrefix(torch.nn.Module):
 
 
 def load_trained_prefix(adapter_dir: str, model_config, n_tokens: int, device):
-    """从 peft 的适配器文件里读出前缀权重，装进 ManualPrefix。"""
+    """从 peft 的适配器文件里读出前缀权重，装进 ManualPrefix。
+
+    不同版本的 peft 对同一份权重的命名不同（prefix_encoder / prompt_embeddings），
+    所以这里按**形状**去找，不依赖键名：
+        前缀权重形状 = [n_tokens, 层数 × 2 × KV头数 × head_dim]
+    """
     sd = load_file(os.path.join(adapter_dir, "adapter_model.safetensors"))
-    keys = [k for k in sd if "prefix_encoder" in k and k.endswith("weight")]
-    if not keys:
-        raise RuntimeError(f"适配器里没有前缀权重，文件中的键：{list(sd.keys())[:10]}")
-    w = sd[keys[0]].float()
-    print(f"  读到前缀权重 {keys[0]}，形状 {tuple(w.shape)}")
+    print(f"  适配器里的键：{list(sd.keys())}")
 
     num_layers = model_config.num_hidden_layers
     num_kv = getattr(model_config, "num_key_value_heads", model_config.num_attention_heads)
     head_dim = getattr(model_config, "head_dim",
                        model_config.hidden_size // model_config.num_attention_heads)
     token_dim = num_kv * head_dim
+    expect_dim = num_layers * 2 * token_dim
+
+    w = None
+    for k, v in sd.items():
+        if v.dim() == 2 and v.shape[0] == n_tokens and v.shape[1] == expect_dim:
+            w = v.float()
+            print(f"  按形状匹配到前缀权重：{k} {tuple(v.shape)}")
+            break
+    if w is None:
+        for k, v in sd.items():
+            print(f"    {k}: {tuple(v.shape)}")
+        raise RuntimeError(
+            f"没找到形状为 [{n_tokens}, {expect_dim}] 的前缀权重；"
+            f"如果某个键的形状是 [{n_tokens}, {model_config.hidden_size}]，"
+            f"那说明存的是软提示而不是每层 K/V 前缀"
+        )
 
     # peft 的排列：[n_tokens, layers*2, token_dim] -> 拆成每层 K、V
     w = w.view(n_tokens, num_layers, 2, num_kv, head_dim)
