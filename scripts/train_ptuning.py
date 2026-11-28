@@ -92,7 +92,10 @@ def main() -> None:
                 def fn(module, inp, out):
                     captured[tag] = out.detach()
                 return fn
-            handles.append(layer.self_attn.k_proj.register_forward_hook(mk(f"k{idx}")))
+            # 关键：K 要抓 k_norm 之后的输出（已归一化，量级与真实 K 一致）。
+            # 抓 k_proj 的话数值过大，会让注意力打分爆炸（实测损失 12.3）。
+            k_module = getattr(layer.self_attn, "k_norm", None) or layer.self_attn.k_proj
+            handles.append(k_module.register_forward_hook(mk(f"k{idx}")))
             handles.append(layer.self_attn.v_proj.register_forward_hook(mk(f"v{idx}")))
 
         with torch.no_grad():
