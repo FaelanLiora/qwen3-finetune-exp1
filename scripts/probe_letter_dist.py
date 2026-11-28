@@ -118,8 +118,10 @@ def main() -> None:
 
     for name in ["基座", "LoRA", "KL-LoRA"]:
         pr = results[name]["probs"]
-        js = sum(js_div(pr[i], base[i], labels) for i in range(len(rows))) / len(rows)
-        pa = sum(p["A"] for p in pr) / len(pr)
+        # 注意：每道题的选项标签可能不同（多数是 A/B/C/D，少数是 1/2/3/4），
+        # 所以散度必须按每道题自己的标签计算，不能用统一的标签表。
+        js = sum(js_div(pr[i], base[i], rows[i]["labels"]) for i in range(len(rows))) / len(rows)
+        pa = sum(p.get("A", 0.0) for p in pr) / len(pr)
         print(f"{name:<10}{js:>12.4f}{pa:>14.4f}{results[name]['acc']:>10.4f}")
 
     print("""
