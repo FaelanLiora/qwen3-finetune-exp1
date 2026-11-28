@@ -103,27 +103,40 @@ def main() -> None:
     with open(os.path.join(args.results, "summary_final.json"), "w", encoding="utf-8") as f:
         json.dump(rows, f, ensure_ascii=False, indent=2)
 
-    # ---------------- 图 1：参数 vs 数学 ----------------
-    pts = [r for r in rows if r["可训练参数"] > 0] + [r for r in rows if r["可训练参数"] == 0]
-    fig, ax = plt.subplots(figsize=(6.4, 4.2), dpi=160)
+    # ---------------- 图 1：五方法双指标柱状图 ----------------
+    # 不用散点：散点会把"基座 0 参数却最高"画成"参数越多越差"，容易误读。
+    # 柱状图能直接看出每个方法在两项指标上的位置，以及相对基座的升降。
+    names = [r["方法"] for r in rows]
+    math_v = [r["数学"] for r in rows]
+    sci_v = [r["科学"] for r in rows]
+    xs = list(range(len(names)))
 
-    xs, ys, labels = [], [], []
-    for r in pts:
-        xs.append(max(r["可训练参数"], 0.12))       # 0% 画在对数轴上用 0.12 占位
-        ys.append(r["数学"])
-        labels.append(r["方法"])
+    fig, ax = plt.subplots(figsize=(7.6, 4.4), dpi=160)
+    w = 0.38
+    b1 = ax.bar([i - w / 2 for i in xs], math_v, w, label="GSM8K (math)", color="#2b6cb0")
+    b2 = ax.bar([i + w / 2 for i in xs], sci_v, w, label="ARC-Challenge (science)", color="#c53030")
 
-    ax.scatter(xs, ys, s=70, c="#2b6cb0", zorder=3)
-    for x, y, lab in zip(xs, ys, labels):
-        ax.annotate(lab, (x, y), textcoords="offset points", xytext=(6, 6), fontsize=8)
+    # 基座的两条参考线
+    if base_math is not None:
+        ax.axhline(base_math, ls="--", lw=1, color="#2b6cb0", alpha=0.45)
+        ax.axhline(base_sci, ls="--", lw=1, color="#c53030", alpha=0.45)
 
-    ax.set_xscale("log")
-    ax.set_xlabel("Trainable parameters (%, log scale)")
-    ax.set_ylabel("GSM8K accuracy (%)")
-    ax.set_title("Math accuracy vs trainable parameters")
-    ax.grid(alpha=0.3, linestyle="--")
+    for bars in (b1, b2):
+        for bar in bars:
+            h = bar.get_height()
+            ax.annotate(f"{h:.1f}", (bar.get_x() + bar.get_width() / 2, h),
+                        textcoords="offset points", xytext=(0, 2),
+                        ha="center", fontsize=7)
+
+    ax.set_xticks(xs)
+    ax.set_xticklabels(names, rotation=12, fontsize=9)
+    ax.set_ylabel("Accuracy (%)")
+    ax.set_ylim(30, 62)
+    ax.set_title("Accuracy on two benchmarks (dashed lines = base model)")
+    ax.legend(fontsize=8, loc="upper right")
+    ax.grid(axis="y", alpha=0.3, linestyle="--")
     fig.tight_layout()
-    fig.savefig(os.path.join(args.results, "fig1_params_vs_math.png"))
+    fig.savefig(os.path.join(args.results, "fig1_accuracy_bars.png"))
     plt.close(fig)
 
     # ---------------- 图 2：A 占比 vs 科学 ----------------
@@ -159,7 +172,7 @@ def main() -> None:
     plt.close(fig)
 
     print(f"\n已生成：")
-    for name in ["summary_table.md", "fig1_params_vs_math.png", "fig2_abias_vs_science.png"]:
+    for name in ["summary_table.md", "fig1_accuracy_bars.png", "fig2_abias_vs_science.png"]:
         print(f"  {os.path.join(args.results, name)}")
 
 
