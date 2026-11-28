@@ -120,7 +120,7 @@ def main() -> None:
     ax.set_xscale("log")
     ax.set_xlabel("Trainable parameters (%, log scale)")
     ax.set_ylabel("GSM8K accuracy (%)")
-    ax.set_title("More trainable parameters -> better math accuracy")
+    ax.set_title("Math accuracy vs trainable parameters")
     ax.grid(alpha=0.3, linestyle="--")
     fig.tight_layout()
     fig.savefig(os.path.join(args.results, "fig1_params_vs_math.png"))
@@ -151,7 +151,7 @@ def main() -> None:
 
     ax.set_xlabel("Ratio of answering 'A' (%)")
     ax.set_ylabel("ARC-Challenge accuracy (%)")
-    ax.set_title("A-bias almost fully determines science score")
+    ax.set_title("Science accuracy vs ratio of answering 'A'")
     ax.grid(alpha=0.3, linestyle="--")
     ax.legend()
     fig.tight_layout()
