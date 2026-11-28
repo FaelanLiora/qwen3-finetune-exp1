@@ -131,6 +131,8 @@ def main() -> None:
     ap.add_argument("--n_tokens", type=int, default=20)
     ap.add_argument("--check_loss", action="store_true",
                     help="不算生成了，改为在验证集上算损失，用来核对前缀权重是否读对")
+    ap.add_argument("--attn", default="eager", choices=["eager", "sdpa"],
+                    help="注意力实现。训练用的是 sdpa，核对时应改成 sdpa 才公平")
     args = ap.parse_args()
 
     tok = AutoTokenizer.from_pretrained(args.model)
@@ -140,7 +142,7 @@ def main() -> None:
     print("加载基座 ...", flush=True)
     model = AutoModelForCausalLM.from_pretrained(
         args.model, dtype=torch.bfloat16, device_map="cuda",
-        attn_implementation="eager").eval()
+        attn_implementation=args.attn).eval()
     model.config.use_cache = False
 
     prefix = load_trained_prefix(args.adapter, model.config, args.n_tokens, model.device)
