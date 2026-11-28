@@ -24,12 +24,13 @@ matplotlib.use("Agg")          # 无界面环境，直接出图
 import matplotlib.pyplot as plt
 
 # (标签, 显示名, 可训练参数百分比)
+# 顺序按 PPT 第 2、9 页的方法排列：Base → Full SFT → LoRA → P-Tuning v2 → KL-LoRA(自研)
 METHODS = [
     ("base",    "Base",         0.00),
     ("full",    "Full SFT",   100.00),
     ("lora",    "LoRA",         1.67),
-    ("kllora",  "KL-LoRA",      1.67),
     ("ptuning", "P-Tuning v2",  0.19),
+    ("kllora",  "KL-LoRA",      1.67),
 ]
 
 
